@@ -114,6 +114,13 @@ function makeTune(reduced) {
     popHeight: 0.22,
     depthWorld: 12,
     depthScale: reduced ? 0.07 : 0.15,
+    // Clearing the field once the row is full. The pop is quicker than
+    // the fade it rides on, so the ball reads as bursting and then going
+    // rather than as deflating.
+    clearPop: reduced ? 0.40 : 0.60,     // squash peak
+    clearPopDur: reduced ? 0.09 : 0.13,  // s
+    clearSec: reduced ? 0.16 : 0.24,     // s — the fade out
+    clearStagger: reduced ? 0.020 : 0.045,
     // A falling ball SWAYS rather than tumbling freely. The tetra4 stamp
     // that faces the camera at baseRotation is the upright one, so
     // staying near it is what keeps numbers readable while the ball still
@@ -131,6 +138,12 @@ function makeTune(reduced) {
     haloPulse: reduced ? 0.06 : 0.16,
   };
 }
+
+/**
+ * Longest a pop-off may wait for its turn. A wide field would otherwise
+ * still be clearing itself while the tray is already nodding.
+ */
+const CLEAR_STAGGER_MAX = 0.26;
 
 /** Spare neighbours a live badge keeps in hand. Mirrors the spawn margin. */
 const RETUNE_NEIGHBOUR_MARGIN = 1;
@@ -853,6 +866,7 @@ export class CatchToPickApp {
       this.rowPhase = 'settling';
       this.spawning = false;
       this._hideHint();
+      this._clearField();
     }
   }
 
@@ -1144,7 +1158,43 @@ export class CatchToPickApp {
     b.exitT = 0;
     b.exitDur = dur;
     b.exitRise = rise;
+    b.exitDelay = 0;
+    b.exitPop = false;
     this.director.release(b.n);
+  }
+
+  /**
+   * The row just filled, so nothing left in the air can be caught. Pop
+   * the rest of the field off rather than letting it fall out of the
+   * bottom: a ball sailing past the capture line reads as a miss the
+   * player made, when it was never catchable, and on the way down it
+   * invites taps that can no longer do anything. It also stops leftovers
+   * living on into the next row, whose pool has already taken their
+   * numbers back.
+   */
+  _clearField() {
+    const T = this.tune;
+    // Lowest first, so the clear travels away from the tray the player is
+    // already looking at instead of racing ahead of the eye.
+    const leaving = this.balls
+      .filter((b) => b.state === FALL)
+      .sort((a, b) => a.y - b.y);
+    leaving.forEach((b, i) => {
+      this.state.noteCleared(b.n);
+      if (this._pulseBall === b) this._pulseBall = null;
+      b.magnet = null;                 // no live badge on a ball that is leaving
+      b.vx *= 0.3; b.vy *= 0.3;        // ease the drift off so it pops, not streaks
+      this._exitBall(b, T.clearSec, false);
+      b.exitDelay = Math.min(i * T.clearStagger, CLEAR_STAGGER_MAX);
+      b.exitPop = true;
+    });
+  }
+
+  /** The visible half of a pop-off, fired on the ball's own beat. */
+  _popOff(b) {
+    this._pop(b, this.tune.clearPop, this.tune.clearPopDur);
+    this.fx.burst(this._toCssX(b.x), this._toCssY(b.y), b.colour.ballColor,
+      { count: 9, speed: 135, size: 5.5, life: 0.34 });
   }
 
   _remove(b) {
@@ -1430,7 +1480,15 @@ export class CatchToPickApp {
         }
 
         case EXIT: {
-          b.exitT += dt;
+          // A staggered pop-off waits its turn at full size, then bursts
+          // on its own beat. Fading silently would read as one more miss;
+          // the pop is what says the row is finished.
+          if (b.exitDelay > 0) {
+            b.exitDelay -= dt;
+          } else {
+            if (b.exitPop) { b.exitPop = false; this._popOff(b); }
+            b.exitT += dt;
+          }
           const k = clamp(b.exitT / b.exitDur, 0, 1);
           b.fade = 1 - k;
           if (b.exitRise) {

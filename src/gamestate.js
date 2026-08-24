@@ -191,6 +191,16 @@ export class GameState {
   }
 
   /**
+   * Record a ball taken off the field because the row filled — NOT a miss.
+   * It never reached the capture line and was never catchable, so counting
+   * it as one would both overstate the miss rate and, through the
+   * director, slow down a field the player was in fact keeping up with.
+   */
+  noteCleared(n) {
+    this.emit('ball_cleared', { number: n, game_number: this.gameNumber });
+  }
+
+  /**
    * Move to the next row, or finish the ticket. Callable only once the
    * current row is complete; a no-op otherwise so a double-fire from
    * animation callbacks cannot skip a row.

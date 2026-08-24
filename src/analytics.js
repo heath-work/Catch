@@ -16,6 +16,7 @@ export const EVENTS = [
   'ball_caught_via_magnet',
   'magnet_ball_caught',
   'ball_missed',
+  'ball_cleared',
   'row_completed',
   'powerball_phase_started',
   'catch_game_completed',

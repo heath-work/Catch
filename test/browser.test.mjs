@@ -232,11 +232,15 @@ suite('Boot and rendering');
       const app = window.__catchToPick;
       app.reconfigure({ product: 'SaturdayLotto', totalGames: 20 });
       await new Promise((res) => setTimeout(res, 400));
-      let caught = 0, missed = 0;
+      let caught = 0, missed = 0, cleared = 0;
       const on = (e) => {
         const d = e.detail;
         if (d.event === 'ball_caught' || d.event === 'ball_caught_via_magnet') caught++;
         if (d.event === 'ball_missed') missed++;
+        // Popped off because the row filled. Uncaught all the same — and
+        // since it is not a miss, it has to be counted here or completing
+        // rows would look like the field had got easier.
+        if (d.event === 'ball_cleared') cleared++;
       };
       window.addEventListener('catchtopick:analytics', on);
       const seen = [];
@@ -249,19 +253,26 @@ suite('Boot and rendering');
             bubbles: true, pointerId: 1, pointerType: 'touch',
           }));
         }
-        seen.push(app.balls.filter((b) => b.state === 0).length);
+        // Only while the row is live: the field is deliberately empty
+        // during the inter-row beat (it clears the moment the row fills),
+        // and averaging that in measures the pause, not the density.
+        if (app.rowPhase === 'play') {
+          seen.push(app.balls.filter((b) => b.state === 0).length);
+        }
         await new Promise((res) => setTimeout(res, 450));
       }
       window.removeEventListener('catchtopick:analytics', on);
       return {
-        caught, missed,
-        avgOnscreen: seen.reduce((s, v) => s + v, 0) / seen.length,
+        caught, missed, cleared,
+        avgOnscreen: seen.length ? seen.reduce((s, v) => s + v, 0) / seen.length : 0,
         throughput: app.director.throughput(),
       };
     });
-    const missRate = r.missed / (r.caught + r.missed);
+    const uncaught = r.missed + r.cleared;
+    const missRate = uncaught / (r.caught + uncaught);
     ok(missRate > 0.4,
-      `${(missRate * 100).toFixed(0)}% of balls went uncaught (${r.caught} caught, ${r.missed} missed)`);
+      `${(missRate * 100).toFixed(0)}% of balls went uncaught `
+      + `(${r.caught} caught, ${r.missed} missed, ${r.cleared} cleared)`);
     ok(r.avgOnscreen > 3,
       `average ${r.avgOnscreen.toFixed(1)} balls on screen while playing`);
     ok(r.throughput > 2.5, `${r.throughput.toFixed(1)} balls/s arriving`);
