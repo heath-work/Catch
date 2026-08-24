@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#050541" />
+  <meta name="description" content="Catch to Pick — choose your lotto numbers by catching them as they fall." />
+  <title>Catch to Pick</title>
+  <link rel="preload" href="./assets/SharpGroteskMedium22.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Touch surface. It sits UNDER the tray chrome (so tray buttons stay
+       clickable) and under the canvases (which are pointer-transparent),
+       which is what lets the balls render over the tray rings while taps
+       still reach the playfield. -->
+  <div id="ctp-input"></div>
+  <div class="ctp-ui" id="ctp-ui"></div>
+  <!-- One WebGL scene for every ball: falling, in flight and seated in
+       the tray, so a capture is a single continuous motion. Painted above
+       the tray so a seated ball sits IN its ring, not behind its fill. -->
+  <canvas id="ctp-scene"></canvas>
+  <!-- Additively-composited effects: sparks, magnet pulses, filaments. -->
+  <canvas id="ctp-fx" aria-hidden="true"></canvas>
+
+  <noscript>
+    <p style="padding:24px;text-align:center">Catch to Pick needs JavaScript enabled.</p>
+  </noscript>
+
+  <script type="module">
+    import { CatchToPickApp } from './src/app.js';
+    import { readHostConfig } from './src/bridge.js';
+
+    function boot() {
+      const els = {
+        canvas: document.getElementById('ctp-scene'),
+        fxCanvas: document.getElementById('ctp-fx'),
+        input: document.getElementById('ctp-input'),
+        ui: document.getElementById('ctp-ui'),
+      };
+      try {
+        // This page's own default ticket length. Still a DEFAULT: anything
+        // the host sets (window.CATCH_TO_PICK_CONFIG) or a `?games=` query
+        // overrides it.
+        const app = new CatchToPickApp(els, { totalGames: 12, ...readHostConfig() });
+        window.__catchToPick = app;      // host / debugging handle
+        app.start();
+      } catch (e) {
+        console.error('[catch-to-pick] boot failed', e);
+        els.ui.innerHTML =
+          '<p style="margin:auto;padding:24px;text-align:center;opacity:.8">' +
+          'Number selection is unavailable right now.</p>';
+      }
+    }
+
+    // Wait for the ball font so the very first number stamps are crisp;
+    // never block boot on it.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.load('500 40px "SharpGroteskMedium22"').catch(() => {});
+      document.fonts.ready.then(boot).catch(boot);
+    } else {
+      boot();
+    }
+  </script>
+</body>
+</html>

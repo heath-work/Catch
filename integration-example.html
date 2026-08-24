@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Catch to Pick — host harness</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; min-height: 100vh; display: grid;
+      grid-template-columns: 390px 1fr; gap: 24px; padding: 24px;
+      background: #0b0d1f; color: #e8ecff;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    @media (max-width: 900px) { body { grid-template-columns: 1fr; } }
+    iframe {
+      width: 390px; height: 844px; border: 1px solid #2b3161; border-radius: 20px;
+      background: #050541; display: block;
+    }
+    h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
+    p  { margin: 0 0 14px; color: #98a0c8; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    button, select {
+      font: inherit; color: #e8ecff; background: #171c3d;
+      border: 1px solid #2b3161; border-radius: 8px; padding: 7px 12px; cursor: pointer;
+    }
+    button:hover { background: #1f2650; }
+    pre {
+      margin: 0; padding: 12px; border-radius: 10px; background: #101433;
+      border: 1px solid #232a56; max-height: 40vh; overflow: auto;
+      font: 12px/1.55 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+    }
+    .k { color: #7effd6; }
+    .n { color: #ffd67e; }
+  </style>
+</head>
+<body>
+  <iframe id="frame" title="Catch to Pick"></iframe>
+
+  <div>
+    <h1>Host harness</h1>
+    <p>
+      Minimal stand-in for the native host. It launches the WebView with a
+      product config, listens for <code>postMessage</code> traffic, and prints the
+      selection returned by <b>Use numbers</b>. No native bridge is present, so
+      the app also dispatches DOM events — either path works.
+    </p>
+
+    <div class="row">
+      <select id="product">
+        <option value="SaturdayLotto">Saturday Lotto — 6 from 1–45</option>
+        <option value="WeekdayWindfall">Weekday Windfall — 6 from 1–45</option>
+        <option value="OzLotto">Oz Lotto — 7 from 1–47</option>
+        <option value="SetForLife">Set for Life — 7 from 1–44</option>
+        <option value="Powerball">Powerball — 7 from 1–35 + PB</option>
+      </select>
+      <select id="games">
+        <option value="1">1 game</option>
+        <option value="2">2 games</option>
+        <option value="5">5 games</option>
+        <option value="20">20 games</option>
+      </select>
+      <button id="launch">Launch</button>
+      <button id="reconfigure">Reconfigure in place</button>
+      <button id="clear">Clear log</button>
+    </div>
+
+    <pre id="log">waiting…</pre>
+  </div>
+
+  <script>
+    const frame = document.getElementById('frame');
+    const logEl = document.getElementById('log');
+    const productEl = document.getElementById('product');
+    const gamesEl = document.getElementById('games');
+    let lines = [];
+
+    function log(kind, payload) {
+      lines.unshift(
+        `<span class="k">${kind}</span> ` +
+        `<span class="n">${new Date().toLocaleTimeString()}</span>\n` +
+        JSON.stringify(payload, null, 1),
+      );
+      logEl.innerHTML = lines.slice(0, 60).join('\n\n');
+    }
+
+    function launch() {
+      lines = [];
+      const q = new URLSearchParams({
+        product: productEl.value,
+        games: gamesEl.value,
+      });
+      frame.src = `./index.html?${q}`;
+      log('launch', { product: productEl.value, games: +gamesEl.value });
+    }
+
+    document.getElementById('launch').addEventListener('click', launch);
+    document.getElementById('clear').addEventListener('click', () => {
+      lines = []; logEl.textContent = 'cleared';
+    });
+
+    // The post-load configure hook the native host would also use.
+    document.getElementById('reconfigure').addEventListener('click', () => {
+      const cfg = { product: productEl.value, totalGames: +gamesEl.value };
+      frame.contentWindow.CatchToPick.configure(cfg);
+      log('configure', cfg);
+    });
+
+    // Everything the WebView emits arrives here: ready, haptic, analytics,
+    // result, close. A native host would receive the same envelopes on its
+    // message handler instead.
+    window.addEventListener('message', (e) => {
+      const m = e.data;
+      if (!m || m.source !== 'catch-to-pick') return;
+      if (m.type === 'result') {
+        log('RESULT', m.payload);
+      } else if (m.type === 'close') {
+        log('close — host would dismiss the WebView', {});
+      } else if (m.type === 'analytics') {
+        log(`analytics · ${m.payload.event}`, m.payload);
+      } else {
+        log(m.type, m.payload);
+      }
+    });
+
+    launch();
+  </script>
+</body>
+</html>

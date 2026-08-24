@@ -1,0 +1,538 @@
+/* =====================================================================
+   styles.css — Catch to Pick
+
+   Structure and naming follow the supplied The Lott tray reference (the
+   shipped pop-2-play tray): a transparent `.tray-mid` carrying ghost
+   rows, the label row and the slot rings, sitting above a `.tray-foot`
+   plate painted by footer_bg.png that holds only the controls.
+
+   Palette is the visualiser's indigo (#050541) rather than the
+   reference's purple, because the matcap ball treatment is authored
+   against that background and must not be re-lit.
+   ===================================================================== */
+
+:root {
+  --ctp-bg-top: #0a0a52;
+  --ctp-bg-mid: #070745;
+  --ctp-bg-bot: #050541;
+  --ctp-plate: #000a30;
+
+  --ring-fill: rgba(24, 26, 96, 0.55);
+  --ring-border: rgba(126, 152, 255, 0.55);
+  --ring-border-bonus: rgba(255, 255, 255, 0.72);
+
+  --accent: #2af8e5;
+  --accent-ink: #071033;
+  --ctrl-fg: rgba(255, 255, 255, 0.85);
+
+  --ctp-safe-top: env(safe-area-inset-top, 0px);
+  --ctp-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ctp-safe-left: env(safe-area-inset-left, 0px);
+  --ctp-safe-right: env(safe-area-inset-right, 0px);
+
+  --ui-font: 'SharpGroteskMedium22', -apple-system, BlinkMacSystemFont,
+             'Segoe UI', system-ui, sans-serif;
+}
+
+@font-face {
+  font-family: 'SharpGroteskMedium22';
+  src: url('./assets/SharpGroteskMedium22.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  /* dvh keeps the layout honest while WebView chrome shows and hides */
+  height: 100dvh;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg,
+    var(--ctp-bg-top) 0%,
+    var(--ctp-bg-mid) 46%,
+    var(--ctp-bg-bot) 100%);
+  color: #fff;
+  font-family: var(--ui-font);
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ── Canvases ─────────────────────────────────────────────────── */
+/* The WebGL canvas holds every 3D ball — falling, in flight and seated
+   in the tray — so a capture is one continuous motion with no handoff
+   between renderers. The FX canvas composites additively above it. */
+#ctp-scene,
+#ctp-fx {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Pointer-transparent: taps fall through to #ctp-input beneath, which
+     is what lets the balls paint over the tray without stealing its
+     controls' input. */
+  pointer-events: none;
+}
+#ctp-scene { z-index: 5; }
+#ctp-fx { z-index: 6; }
+
+/* The play surface. Full-bleed but beneath the tray chrome, so a tap in
+   the lower control strip belongs to the tray, not the game. */
+#ctp-input {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  touch-action: none;
+}
+
+/* ── UI layer ─────────────────────────────────────────────────── */
+.ctp-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.ctp-ui > * { pointer-events: auto; }
+
+.ctp-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Onboarding microcopy — teaches through motion, never a modal. */
+.ctp-hint {
+  /* Anchored just above the tray rather than at the top of the screen:
+     it is where the eye already is, and it is the calmest band of the
+     playfield, so falling balls rarely collide with it. */
+  position: absolute;
+  left: 50%;
+  bottom: var(--ctp-hint-bottom, 30%);
+  transform: translate(-50%, 6px);
+  padding: 9px 20px;
+  border-radius: 999px;
+  /* A plain scrim rather than a backdrop-filter: the filter promotes the
+     element to its own composited layer, which visibly greys the text
+     against the playfield and costs a blur pass every frame. */
+  background: radial-gradient(ellipse at center,
+    rgba(5, 6, 44, 0.86) 0%,
+    rgba(5, 6, 44, 0.62) 62%,
+    rgba(5, 6, 44, 0) 100%);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 320ms ease, transform 320ms ease;
+}
+.ctp-hint.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+/* Contextual cue anchored under a magnet ball the first time one falls. */
+.ctp-cue {
+  position: absolute;
+  transform: translate(-50%, 0) scale(0.94);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(6, 8, 48, 0.88);
+  border: 1px solid rgba(150, 180, 255, 0.34);
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.ctp-cue.is-on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+
+/* Phase banner — the Powerball stage change. Quick and quiet. */
+.ctp-banner {
+  position: absolute;
+  left: 0; right: 0;
+  top: 34%;
+  text-align: center;
+  font-size: 26px;
+  letter-spacing: 0.01em;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 300ms ease, transform 420ms cubic-bezier(.22, 1, .36, 1);
+}
+.ctp-banner.is-on { opacity: 1; transform: none; }
+
+.ctp-debug {
+  position: absolute;
+  left: 8px;
+  top: calc(var(--ctp-safe-top) + 8px);
+  font: 500 11px/1.45 ui-monospace, Menlo, monospace;
+  white-space: pre;
+  color: #7effd6;
+  background: rgba(0, 0, 0, 0.42);
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+
+/* ── Tray ─────────────────────────────────────────────────────── */
+.ctp-tray {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  /* Only the control plate takes input. The tray's own box extends up over
+     live playfield, and while it was pointer-opaque every real touch aimed
+     at a low ball hit the tray instead of the game. */
+  pointer-events: none;
+}
+.tray-foot { pointer-events: auto; }
+
+.tray-mid {
+  background: transparent;
+  padding: 52px 16px 10px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 3;
+  /* Nothing in here is interactive — ghost rows, labels and empty slot
+     holders. Leaving it pointer-opaque meant its top padding (52px of
+     live playfield, right where balls are fastest) silently swallowed
+     every tap aimed at a ball. */
+  pointer-events: none;
+}
+
+.tray-foot {
+  /* footer_bg.png is the reference's dark plate with a soft arc at the
+     top, so the plate visually begins BELOW the slot row. */
+  background:
+    url('./assets/footer_bg.png') top center / 100% 100% no-repeat,
+    var(--ctp-plate);
+  padding: 12px 16px calc(12px + var(--ctp-safe-bottom));
+  flex-shrink: 0;
+  position: relative;
+  z-index: 3;
+}
+
+/* Ghost rows — each completed game rises, blurs and fades above the
+   active slot row, exactly as the reference tray stacks games. */
+.tray-ghost-row {
+  position: absolute;
+  top: 6px;
+  left: 16px;
+  right: 16px;
+  height: 30px;
+  pointer-events: none;
+  z-index: 1;
+}
+.tray-ghost-row .ghost-row {
+  --ghost-enter-from: 52px;
+  --ghost-leave-to: -40px;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--ctp-cols, 6), minmax(0, 1fr));
+  gap: 6px;
+  justify-items: center;
+  align-items: center;
+  transform: translateY(var(--ghost-enter-from));
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    transform 480ms cubic-bezier(.22, 1, .36, 1),
+    opacity 480ms ease-out,
+    filter 480ms ease-out;
+  will-change: transform, opacity, filter;
+}
+.tray-ghost-row .ghost-row.ghost-rested {
+  transform: translateY(0);
+  opacity: 0.55;
+  filter: blur(3.5px);
+}
+.tray-ghost-row .ghost-row.ghost-leaving {
+  transform: translateY(var(--ghost-leave-to));
+  opacity: 0;
+  filter: blur(6px);
+}
+/* Mirror the slot grid, separator track included, so a Powerball ghost
+   row keeps all eight numbers on one line. */
+.tray-ghost-row .ghost-row.has-bonus {
+  grid-template-columns:
+    repeat(var(--ctp-cols, 7), minmax(0, 1fr))
+    12px
+    repeat(var(--ctp-bonus-cols, 1), minmax(0, 1fr));
+}
+.tray-ghost-row .ghost {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.95);
+}
+.tray-ghost-gradient {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 46px;
+  background: linear-gradient(180deg,
+    rgba(5, 5, 65, 1) 0%,
+    rgba(5, 5, 65, 0) 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* "YOUR NUMBERS | Game N/M | PB" */
+.tray-labels {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 4px 2px 6px;
+  z-index: 3;
+}
+.tray-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.9);
+}
+.tray-label-left { text-align: left; text-transform: uppercase; }
+.tray-label-mid { text-align: center; }
+.tray-label-right {
+  text-align: right;
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 260ms ease, text-shadow 260ms ease;
+}
+.tray-label-right.is-active {
+  color: #fff;
+  text-shadow: 0 0 14px rgba(190, 220, 255, 0.7);
+}
+
+.tray-balls { position: relative; }
+
+/* Empty holders. The real balls are 3D meshes parked over these. */
+.tray-rings {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--ctp-cols, 6), minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+/* A visible gap keeps the bonus pool from reading as one run of numbers.
+   The bonus side is a track COUNT, not a single hard-placed column, so a
+   host that asks for more than one bonus number still lays out in one row
+   instead of stacking below the tray. */
+.tray-rings.has-bonus {
+  grid-template-columns:
+    repeat(var(--ctp-cols, 7), minmax(0, 1fr))
+    12px
+    repeat(var(--ctp-bonus-cols, 1), minmax(0, 1fr));
+}
+
+.ring {
+  width: 100%;
+  /* Capped so a wide (landscape) viewport cannot inflate the tray
+     vertically and squeeze the playfield out of existence. */
+  max-width: 54px;
+  margin: 0 auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: var(--ring-fill);
+  border: 2px solid var(--ring-border);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  position: relative;
+  z-index: 1;
+}
+.ring-bonus { border-color: var(--ring-border-bonus); }
+
+/* Row-completion acknowledgement — a small nod, not a celebration. */
+.ring-ack { animation: ring-ack 460ms cubic-bezier(.22, 1, .36, 1) var(--ack-delay, 0ms) both; }
+@keyframes ring-ack {
+  0% { transform: scale(1); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35); }
+  38% { transform: scale(1.11); box-shadow: 0 0 16px rgba(150, 200, 255, 0.55); }
+  100% { transform: scale(1); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35); }
+}
+
+/* ── Controls ─────────────────────────────────────────────────── */
+.tray-ctas {
+  display: grid;
+  grid-template-columns: 44px auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.ctl {
+  border: none;
+  background: transparent;
+  color: var(--ctrl-fg);
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 120ms ease, background 200ms ease, opacity 200ms ease;
+}
+.ctl:active { transform: translateY(1px); }
+.ctl:disabled { opacity: 0.35; cursor: default; }
+.ctl-glass {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.ctl-round { width: 44px; height: 44px; border-radius: 50%; }
+.ctl-round svg { width: 20px; height: 20px; color: rgba(255, 255, 255, 0.78); }
+/* `display` on the rule above would otherwise beat the hidden attribute. */
+.ctl svg[hidden] { display: none; }
+
+.ctl-pill {
+  position: relative;
+  height: 44px;
+  min-width: 82px;
+  border-radius: 22px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.ctl-pill-count { line-height: 1; }
+.ctl-pill-progress {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.ctl-pill-progress rect {
+  fill: none;
+  /* Hidden at zero so the round line cap cannot render as a stray dot. */
+  stroke-opacity: 0;
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transition: stroke-dashoffset 260ms cubic-bezier(.25, 1.05, .4, 1),
+              stroke-opacity 200ms ease;
+}
+.ctp-progress.has-progress .ctl-pill-progress rect { stroke-opacity: 1; }
+
+.ctl-fast-select {
+  height: 44px;
+  border-radius: 22px;
+  padding: 0 22px;
+  background: rgba(150, 165, 240, 0.18);
+  border: 1px solid rgba(190, 205, 255, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+/* Ready state uses the product's own accent, matching the reference's
+   primary-commit treatment. */
+.ctl-fast-select.is-ready {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 8px 26px rgba(42, 248, 229, 0.26);
+}
+
+/* ── Accessibility ────────────────────────────────────────────── */
+/* The mechanics survive reduced motion; only the flourish is removed.
+   Ball motion itself is toned down in JS (makeTune), not disabled. */
+@media (prefers-reduced-motion: reduce) {
+  .tray-ghost-row .ghost-row { transition-duration: 200ms; }
+  .ring-ack { animation-duration: 240ms; }
+  .ctp-banner, .ctp-hint, .ctp-cue { transition-duration: 140ms; }
+}
+
+/* Filled slots get a faint inner lift so a seated ball reads as seated
+   even before its 3D ball is composited over the ring. */
+.ring.is-filled { border-color: rgba(170, 196, 255, 0.8); }
+
+/* Explicit spacer cells occupy the separator track in both the slot row
+   and the ghost row, so auto-placement lines the bonus slots up with the
+   bonus tracks for ANY bonus count. */
+.ring-gap, .ghost-gap { width: 100%; height: 1px; }
+
+/* Numbers live on the ball, in each slot's accessible label and in the
+   live status region, so nothing is carried by colour alone. */
+.ctp-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Narrow viewports (compact iPhone / small Android) — the label row must
+   stay on one line, or it steals height from the playfield. */
+@media (max-width: 365px) {
+  .tray-label { font-size: 10.5px; letter-spacing: 0.02em; }
+  .tray-mid { padding-left: 12px; padding-right: 12px; }
+  .tray-rings { gap: 5px; }
+  .tray-rings.has-bonus {
+    grid-template-columns:
+      repeat(var(--ctp-cols, 7), minmax(0, 1fr))
+      9px
+      repeat(var(--ctp-bonus-cols, 1), minmax(0, 1fr));
+  }
+  .tray-ctas { grid-template-columns: 40px auto 1fr; gap: 8px; }
+  .ctl-round { width: 40px; height: 40px; }
+  .ctl-pill, .ctl-fast-select { height: 40px; border-radius: 20px; font-size: 15px; }
+  .ctl-pill { min-width: 72px; padding: 0 12px; }
+  .ctl-fast-select { padding: 0 14px; }
+}
+.tray-label { white-space: nowrap; }
+
+/* Very short viewports (compact iPhone / small Android) — reclaim the
+   tray's breathing room so the play area never shrinks below usable. */
+@media (max-height: 700px) {
+  .tray-mid { padding-top: 40px; padding-bottom: 8px; }
+  .tray-foot { padding-top: 10px; }
+  .ctp-banner { font-size: 23px; }
+}
+@media (max-height: 620px) {
+  .tray-mid { padding-top: 30px; }
+}
+
+/* Landscape is a fallback orientation, not the design target: the tray
+   collapses to the minimum it needs so the play band stays usable. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .tray-mid { padding: 18px 16px 4px; }
+  .tray-foot { padding-top: 8px; padding-bottom: calc(8px + var(--ctp-safe-bottom)); }
+  .tray-ghost-row { display: none; }
+  .ring { max-width: 34px; border-width: 1.5px; }
+  .tray-rings { gap: 4px; }
+  .tray-labels { padding-bottom: 3px; }
+  .tray-label { font-size: 11px; }
+  .ctl-round { width: 38px; height: 38px; }
+  .ctl-pill, .ctl-fast-select { height: 38px; border-radius: 19px; }
+  .ctp-banner { font-size: 21px; top: 24%; }
+}

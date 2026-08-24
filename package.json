@@ -1,0 +1,14 @@
+{
+  "name": "catch-to-pick",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Catch to Pick \u2014 a playful number-selection WebView for The Lott. Tap falling 3D lotto balls to build a game row.",
+  "scripts": {
+    "dev": "python3 -m http.server 8790",
+    "serve": "python3 -m http.server 8790",
+    "test": "node test/logic.test.mjs",
+    "test:browser": "NODE_PATH=\"../Pinata-Pick/node_modules\" node test/browser.test.mjs",
+    "test:all": "npm test && npm run test:browser"
+  }
+}
