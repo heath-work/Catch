@@ -160,7 +160,8 @@ export class GameState {
    * group can never exist. The caller must have sized the group against
    * `slotsRemaining` already; anything that no longer fits is refused
    * outright rather than truncated.
-   * @param {number[]} numbers primary/bonus numbers, magnet ball first
+   * @param {number[]} numbers the numbers the magnet pulled in. The
+   *        magnet itself is a device, not a number, so it is NOT here.
    * @param {number} tier the advertised xN
    */
   captureGroup(numbers, tier) {

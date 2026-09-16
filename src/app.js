@@ -139,6 +139,9 @@ function makeTune(reduced) {
   };
 }
 
+/** The multiplier orb's own glow. Its palette is fixed across variants. */
+const PLASMA_WASH = '#3f6dff';
+
 /**
  * Longest a pop-off may wait for its turn. A wide field would otherwise
  * still be clearing itself while the tray is already nodding.
@@ -339,7 +342,7 @@ export class CatchToPickApp {
     this.overlay.hint.classList.remove('is-on');
   }
 
-  /** Small contextual cue anchored near a ball ("Pulls in 4 more"). */
+  /** Small contextual cue anchored near a ball ("Pulls in 4 balls"). */
   _showCue(text, cssX, cssY) {
     const c = this.overlay.cue;
     c.textContent = text;
@@ -727,7 +730,10 @@ export class CatchToPickApp {
     const tier = plan.effective;
     ball.magnet.tier = tier;
     plan.targets.length = tier;
-    const numbers = [ball.n, ...plan.targets.map((t) => t.n)];
+    // The device's own number never goes to the tray: x3 delivers three
+    // balls, not the multiplier plus three. It is released back to the
+    // pool when the device discharges, in _cascade.
+    const numbers = plan.targets.map((t) => t.n);
 
     let commit = this.state.captureGroup(numbers, tier);
     if (!commit.ok) {
@@ -742,7 +748,6 @@ export class CatchToPickApp {
     this.director.noteCatch();
 
     const slots = commit.results.map((r) => r.slot);
-    ball.slot = slots[0];
     ball.state = PULL;                       // the magnet holds while it pulls
     ball.pullHold = true;
     // The magnet loads before it fires: a vertical STRETCH rather than a
@@ -762,10 +767,10 @@ export class CatchToPickApp {
     plan.targets.forEach((t, i) => {
       t.state = PULL;
       t.magnetRef = ball;
-      t.slot = slots[i + 1];
+      t.slot = slots[i];
       t.pullT = 0;
       t.collapsed = false;
-      t.cascadeIndex = i + 1;
+      t.cascadeIndex = i;
       t.swirlSign = this.rng.float() < 0.5 ? -1 : 1;
       // Each neighbour gets its own berth in a rosette around the magnet,
       // so the group collapses into a readable cluster instead of a blob.
@@ -1287,7 +1292,9 @@ export class CatchToPickApp {
       if (b && b.magnet && !this._seenMagnet) {
         this._seenMagnet = true;
         writeFlag('seenMagnet');
-        this._showCue(`Pulls in ${b.magnet.tier} more`,
+        // Not "N more": the device is not one of the numbers, so N is the
+        // whole catch.
+        this._showCue(`Pulls in ${b.magnet.tier} balls`,
           clamp(this._toCssX(b.x), 70, this.size.w - 70),
           clamp(this._toCssY(b.y) + b.r + 26, this.area.top + 30, this.area.floor - 40));
       }
@@ -1539,7 +1546,7 @@ export class CatchToPickApp {
     // uses: a single ball leaving between frames can then never make the
     // advertised promise unkeepable.
     const cap = Math.min(
-      this.state.slotsRemaining - 1,
+      this.state.slotsRemaining,
       neighbours - RETUNE_NEIGHBOUR_MARGIN,
       TIERS[TIERS.length - 1],
     );
@@ -1642,7 +1649,21 @@ export class CatchToPickApp {
     const f = b.state === EXIT ? Math.pow(b.fade, 0.45) : 1;
     m.position.set(b.x, b.y, b.z);
     m.scale.set(rx * f, ry * f, b.r * grow * f);
-    m.visible = f > 0.02;
+    // A multiplier is a device, not a luckier Lotto ball: its numbered
+    // mesh is hidden and a plasma core is drawn in its place, at exactly
+    // the same centre and radii. Only the body changes — position, size,
+    // hit area, physics and the chrome below are untouched. `magnet` is
+    // cleared on launch, so a captured multiplier is a numbered ball
+    // again from the moment it leaves for the tray.
+    const plasma = !!b.magnet;
+    m.visible = f > 0.02 && !plasma;
+    if (plasma) {
+      // Seeded off the ball's own number, so two orbs on screen never
+      // discharge in lockstep, and burning harder while it is held.
+      const charged = b.seq ? (b.seq.holding ? clamp(b.seq.holdT / b.seq.holdDur, 0, 1) : 0.35) : 0;
+      this.fx.orb(this._toCssX(b.x), this._toCssY(b.y), rx * f, ry * f,
+        this.timeSec, b.n * 0.618, charged, f);
+    }
 
     if (b.magnet && (b.state === FALL || b.state === PULL)) {
       const tier = b.magnet.tier;
@@ -1653,10 +1674,13 @@ export class CatchToPickApp {
       const boost = 1 + charge * 0.42;
       const pulse = (0.72 + Math.sin(this.timeSec * (4.2 + w * 2 + charge * 14)) * this.tune.haloPulse) * boost;
       const cx = this._toCssX(b.x), cy = this._toCssY(b.y);
-      // Two-layer glow: a cool-white core so a magnet reads the same on
-      // every colour band, plus an outer wash tinted by the ball itself.
+      // Two-layer glow: a cool-white core plus an outer wash. The wash
+      // was tinted by the ball's own palette colour; it is plasma blue
+      // now, because the number under a multiplier is hidden and tinting
+      // by it made the device read as a differently-coloured Lotto ball.
+      // Size, pulse and alpha are untouched.
       const dim = this._closing ? 0.3 : 1;
-      this.fx.halo(cx, cy, b.r * (2.4 + w * 1.1) * pulse, b.colour.ballColor, (0.34 + w * 0.2) * dim);
+      this.fx.halo(cx, cy, b.r * (2.4 + w * 1.1) * pulse, PLASMA_WASH, (0.34 + w * 0.2) * dim);
       this.fx.halo(cx, cy, b.r * (1.35 + w * 0.3) * pulse, '#dcefff', (0.5 + w * 0.2) * dim);
       // A broken, rotating ring frames it without looking like UI chrome.
       this.fx.arc(cx, cy, b.r * (1.42 + w * 0.12) * boost, '#eaf6ff',
@@ -1748,22 +1772,20 @@ export class CatchToPickApp {
     }
     bridge.haptic(tier >= 5 ? bridge.HAPTICS.HEAVY : bridge.HAPTICS.MEDIUM);
 
-    // Magnet leads; neighbours follow on an ACCELERANDO — the run tightens
-    // into its last note instead of ticking like a metronome.
+    // The neighbours follow on an ACCELERANDO — the run tightens into its
+    // last note instead of ticking like a metronome.
     const flying = seq.targets.filter((t) => t.state === PULL);
-    const total = flying.length + 1;
+    const total = flying.length;
     const base = this.tune.cascadeStagger;
     const accel = this.tune.cascadeAccel;
 
+    // The device fires and is spent. It holds no number and takes no
+    // slot, so instead of flying to the tray it discharges here, and its
+    // number goes back to the pool (_exitBall releases it).
     m.pullHold = false;
-    m.spinRate = this.tune.flightSpin;
-    this._launch(m, m.slot);
-    m.inCascade = true;
-    m.cascadeIndex = 0;
-    m.cascadeTotal = total;
-    m.cascadeTier = tier;
-    m.cascadeLast = total === 1;
-    this._setSpring(m, this.state.isRowComplete && m.cascadeLast);
+    m.spinRate = 0;
+    this._pop(m, 0.75, 0.22);
+    this._exitBall(m, 0.3);
 
     let delay = 0;
     flying.forEach((t, i) => {
@@ -1772,7 +1794,7 @@ export class CatchToPickApp {
       this._launch(t, t.slot);
       t.delay = delay;
       t.inCascade = true;
-      t.cascadeIndex = i + 1;
+      t.cascadeIndex = i;
       t.cascadeTotal = total;
       t.cascadeTier = tier;
       t.cascadeLast = i === flying.length - 1;

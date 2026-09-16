@@ -1,9 +1,10 @@
 /* =====================================================================
    magnet.js — magnet-ball rules (pure). No DOM, no Three.js.
 
-   A magnet ball advertises `xN`, meaning "pulls in N ADDITIONAL balls".
-   So an x6 captures seven numbers: the magnet itself plus six
-   neighbours. The promise on the ball must always be kept, which drives
+   A magnet advertises `xN`, meaning "pulls in N balls". It is a DEVICE,
+   not a number: it never carries a number into the row and never takes a
+   slot of its own, so an x6 captures exactly six numbers and the device
+   is spent. The promise on the badge must always be kept, which drives
    two hard rules:
 
      1. A tier only spawns when the field can actually supply N
@@ -38,8 +39,9 @@ const SPAWN_NEIGHBOUR_MARGIN = 1;
  * @returns {number} 0 when no magnet should spawn at all
  */
 export function maxEligibleTier(slotsRemaining, availableNeighbours) {
-  // The magnet occupies one slot itself, so tier <= slotsRemaining - 1.
-  const byCapacity = slotsRemaining - 1;
+  // The device takes no slot of its own, so the whole of what is left of
+  // the row is available to what it pulls in: tier <= slotsRemaining.
+  const byCapacity = slotsRemaining;
   // Require a little slack so a neighbour drifting off-screen between
   // spawn and tap cannot make the promise unkeepable.
   const byField = availableNeighbours - SPAWN_NEIGHBOUR_MARGIN;
@@ -80,11 +82,12 @@ export function chooseTier(rng, slotsRemaining, availableNeighbours, chance = MA
  * @param {{x:number,y:number}} magnet
  * @param {{x:number,y:number,n:number}[]} candidates balls eligible to be pulled
  * @param {number} tier advertised xN
- * @param {number} slotsRemaining slots left in the current phase, magnet included
+ * @param {number} slotsRemaining slots left in the current phase, all of
+ *        which the pull may use — the device itself takes none of them
  * @returns {{ tier:number, effective:number, targets:object[] }}
  */
 export function resolveMagnetCapture(magnet, candidates, tier, slotsRemaining) {
-  const room = Math.max(0, slotsRemaining - 1);          // minus the magnet itself
+  const room = Math.max(0, slotsRemaining);
   const want = Math.min(tier, room, candidates.length);
   if (want <= 0) return { tier, effective: 0, targets: [] };
   const scored = candidates

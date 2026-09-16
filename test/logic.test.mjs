@@ -279,17 +279,19 @@ await test('products without a bonus never enter the bonus phase', () => {
    ================================================================= */
 suite('Magnet rules');
 
-await test('xN means N ADDITIONAL balls — N+1 numbers are captured', () => {
+await test('xN captures exactly N balls — the multiplier is not one of them', () => {
   for (const tier of TIERS) {
     const s = new GameState(cfg('OzLotto', { primaryCount: 7 }));
     const targets = [];
     for (let i = 0; i < tier; i++) targets.push({ n: 10 + i, x: i * 10, y: 0 });
     const plan = resolveMagnetCapture({ x: 0, y: 0 }, targets, tier, s.slotsRemaining);
     eq(plan.effective, tier, `x${tier} neighbours`);
-    const numbers = [1, ...plan.targets.map((t) => t.n)];
+    const numbers = plan.targets.map((t) => t.n);
     const r = s.captureGroup(numbers, tier);
     ok(r.ok, `x${tier} commits`);
-    eq(s.row.primary.length, tier + 1, `x${tier} total captured`);
+    eq(s.row.primary.length, tier, `x${tier} delivers exactly ${tier}`);
+    // The device carries no number, so nothing of it reaches the row.
+    deepEq(s.row.primary.slice().sort((a, b) => a - b), numbers.slice().sort((a, b) => a - b));
   }
 });
 
@@ -308,14 +310,14 @@ await test('a magnet can never overflow a game row', () => {
   for (let slots = 1; slots <= 8; slots++) {
     const tier = maxEligibleTier(slots, 40);
     if (tier === 0) continue;
-    ok(tier + 1 <= slots, `x${tier} fits in ${slots} slots`);
+    ok(tier <= slots, `x${tier} fits in ${slots} slots`);
   }
 });
 
 await test('tiers are disabled as the row fills', () => {
-  eq(maxEligibleTier(3, 40), 2);     // 2 slots free after the magnet
-  eq(maxEligibleTier(2, 40), 0);     // only one companion would fit
-  eq(maxEligibleTier(1, 40), 0);     // just the magnet — no promise possible
+  eq(maxEligibleTier(3, 40), 3);     // the device takes no slot of its own
+  eq(maxEligibleTier(2, 40), 2);
+  eq(maxEligibleTier(1, 40), 0);     // one slot cannot hold even an x2
   eq(maxEligibleTier(0, 40), 0);
 });
 
@@ -327,7 +329,7 @@ await test('chooseTier never returns an illegal tier, over many draws', () => {
     const t = chooseTier(r, slots, neighbours, 1);   // always attempt
     if (t === 0) continue;
     ok(t >= 2 && t <= 6, `tier ${t} in range`);
-    ok(t + 1 <= slots, `x${t} fits ${slots}`);
+    ok(t <= slots, `x${t} fits ${slots}`);
     ok(t <= neighbours - 1, `x${t} has ${neighbours} candidates`);
   }
 });
@@ -382,12 +384,12 @@ await test('a thinned field reduces the effective count rather than lying', () =
 await test('magnet analytics report the tier and the delivered count', () => {
   const seen = [];
   const s = new GameState(cfg('OzLotto'), { onEvent: (n, p) => seen.push([n, p]) });
-  s.captureGroup([1, 2, 3], 2);
+  s.captureGroup([1, 2], 2);
   const m = seen.find(([n]) => n === 'magnet_ball_caught');
   ok(m, 'magnet_ball_caught emitted');
   eq(m[1].magnet_tier, 2);
-  eq(m[1].captured, 3);
-  eq(seen.filter(([n]) => n === 'ball_caught_via_magnet').length, 3);
+  eq(m[1].captured, 2, 'an x2 delivers two, not three');
+  eq(seen.filter(([n]) => n === 'ball_caught_via_magnet').length, 2);
 });
 
 /* =================================================================
@@ -695,12 +697,14 @@ await test('10k simulated rows across every product stay valid', () => {
           const others = field.slice(1);
           const plan = resolveMagnetCapture(magnet, others, tier, s.slotsRemaining);
           // The app's contract: an advertised tier must be deliverable.
-          ok(plan.effective === Math.min(tier, s.slotsRemaining - 1, others.length),
+          ok(plan.effective === Math.min(tier, s.slotsRemaining, others.length),
             'effective count is the honest minimum');
-          const numbers = [magnet.n, ...plan.targets.map((t) => t.n)];
+          const numbers = plan.targets.map((t) => t.n);
           const res = s.captureGroup(numbers, tier);
           ok(res.ok, `group of ${numbers.length} into ${s.slotsRemaining} slots`);
           for (const n of numbers) d.release(n);
+          // The device is spent rather than captured: its number goes back.
+          d.release(magnet.n);
         } else {
           const pick = field[r.intBelow(field.length)];
           s.capture(pick.n);

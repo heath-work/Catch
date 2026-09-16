@@ -161,13 +161,17 @@ on screen together.
 
 ## Magnet balls
 
-An `xN` badge means "pulls in **N additional** balls", so an x6 captures seven
-numbers. The promise is always kept, which drives two hard rules:
+An `xN` badge means "pulls in **N** balls", so an x6 captures six numbers. The
+magnet is a **device, not a number**: it carries nothing into the row, takes no
+slot of its own, and is spent when it fires — it discharges on the spot while
+the balls it pulled fly to the tray. It renders as a plasma orb rather than a
+numbered ball for exactly this reason. The promise is always kept, which drives
+two hard rules:
 
-1. **Capacity.** A tier can only exist if `tier + 1 <= slotsRemaining`. As the row
-   fills, tiers are capped and then the treatment is dropped entirely. A magnet
-   can never overflow a row. (A 6-number row therefore caps at x5 — seven balls
-   will not fit in six slots.)
+1. **Capacity.** A tier can only exist if `tier <= slotsRemaining`. As the row
+   fills, tiers are capped and then the treatment is dropped entirely (one free
+   slot cannot hold even an x2). A magnet can never overflow a row. A 6-number
+   row is filled exactly by a single x6.
 2. **Field.** A magnet arrives **with its own shoal**: the spawner adds however
    many ordinary balls the tier needs, plus one spare. Gating on balls that
    happened to already be falling made the ladder collapse — a player who catches
@@ -178,7 +182,7 @@ numbers. The promise is always kept, which drives two hard rules:
    **synchronously at the instant of the tap**. If the field genuinely cannot
    supply the advertised tier — two magnets caught in one touch event, say — the
    badge steps down to what is real *before* the animation starts. `xN` delivers
-   exactly N+1 numbers, or the badge is no longer showing N. It never lies.
+   exactly N numbers, or the badge is no longer showing N. It never lies.
 
 Higher tiers are progressively rarer (`TIER_WEIGHTS` in `src/magnet.js`).
 Magnets are disabled during the Powerball stage, which has a single slot. A
@@ -187,7 +191,8 @@ frames on screen — a captured number is never assembled out of sight.
 
 On capture: pulse ring → neighbours bend inward along curves with energy
 filaments → they settle into a rosette around the magnet → the group collapses →
-all numbers cascade to the tray on a rhythmic stagger. Sound and haptics escalate
+the device discharges and the numbers it pulled cascade to the tray on a
+rhythmic stagger. Sound and haptics escalate
 with the tier, pinned to one pentatonic scale so what stacks always consonates,
 resolving onto a chord at x4 and above.
 

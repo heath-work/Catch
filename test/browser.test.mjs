@@ -689,9 +689,9 @@ suite('Capture');
 suite('Magnets');
 
 {
-  // Oz Lotto's 7-number row is the smallest that can legally hold an x6
-  // (magnet + six neighbours). A 6-number row caps at x5 by design; that
-  // is asserted separately below.
+  // A multiplier is a device, not a number, so an x6 needs six free
+  // slots and no more. Oz Lotto's 7-number row holds one with a slot to
+  // spare; a 6-number row is filled exactly by it.
   const page = await newPage('?product=OzLotto');
   await waitForField(page, 4);
 
@@ -727,12 +727,12 @@ suite('Magnets');
   }, tier);
 
   for (const tier of [2, 3, 4, 5, 6]) {
-    await test(`x${tier} captures exactly ${tier + 1} numbers`, async () => {
+    await test(`x${tier} captures exactly ${tier} numbers`, async () => {
       await page.evaluate(() => window.__catchToPick.restart());
       await waitForField(page, 4);
       const r = await forceMagnet(tier);
       eq(r.tierShown, tier, 'the tier survived the live re-tune');
-      eq(r.committed, tier + 1, `x${tier} = magnet + ${tier}`);
+      eq(r.committed, tier, `x${tier} = ${tier} balls, the device is not one of them`);
       ok(r.unique, 'no duplicates');
       ok(r.pulling >= 1, 'neighbours are being pulled');
     });
@@ -819,7 +819,7 @@ suite('Magnets');
     eq(new Set(delays.map((d) => Math.round(d * 1000))).size > 1, true, 'delays differ');
   });
 
-  await test('a six-number row caps magnets at x5 — never an unkeepable x6', async () => {
+  await test('a six-number row is filled exactly by an x6', async () => {
     const r = await page.evaluate(async () => {
       const app = window.__catchToPick;
       app.reconfigure({ product: 'SaturdayLotto', totalGames: 1 });
@@ -831,11 +831,13 @@ suite('Magnets');
       const shown = m.magnet ? m.magnet.tier : 0;
       const before = app.state.row.primary.length;
       app._captureMagnet(m);
-      return { shown, committed: app.state.row.primary.length - before, cap: app.config.primaryCount };
+      return { shown, committed: app.state.row.primary.length - before, cap: app.config.primaryCount,
+               deviceInRow: app.state.row.primary.includes(m.n) };
     });
     eq(r.cap, 6);
-    eq(r.shown, 5, 'x6 was downgraded to the largest keepable promise');
+    eq(r.shown, 6, 'six free slots hold an x6, now that the device takes none');
     eq(r.committed, 6, 'the whole row filled, and did not overflow');
+    eq(r.deviceInRow, false, 'the device itself never reached the tray');
     await page.evaluate(() => window.__catchToPick.reconfigure({ product: 'OzLotto', totalGames: 1 }));
     await page.waitForTimeout(400);
   });
@@ -843,20 +845,29 @@ suite('Magnets');
   await test('a magnet advertises only what the row can still take', async () => {
     const r = await page.evaluate(async () => {
       const app = window.__catchToPick;
-      app.restart();
-      // Leave two slots: a magnet may promise at most x1 -> none at all.
-      const leave = app.config.primaryCount - 2;
-      for (let n = 1; n <= leave; n++) app.state.capture(n);
-      app._syncChrome();
-      const b = app._spawn();
-      if (!b) return { skipped: true };
-      b.magnet = { tier: 6 };
-      app._retuneMagnet(b);
-      return { magnet: b.magnet ? b.magnet.tier : 0, slots: app.state.slotsRemaining };
+      const probe = async (leaveFree) => {
+        app.restart();
+        await new Promise((res) => setTimeout(res, 250));
+        for (const b of app.balls.slice()) app._remove(b);
+        for (let n = 1; n <= app.config.primaryCount - leaveFree; n++) app.state.capture(n);
+        app._syncChrome();
+        // Plenty of neighbours, so only the row's capacity can bind.
+        for (let i = 0; i < 9; i++) { const b = app._spawn(); if (b) b.magnet = null; }
+        const b = app._spawn();
+        if (!b) return null;
+        b.magnet = { tier: 6 };
+        app._retuneMagnet(b);
+        return { tier: b.magnet ? b.magnet.tier : 0, slots: app.state.slotsRemaining };
+      };
+      return { two: await probe(2), one: await probe(1) };
     });
-    if (!r.skipped) {
-      eq(r.slots, 2);
-      eq(r.magnet, 0, 'the treatment is dropped rather than over-promising');
+    if (r.two) {
+      eq(r.two.slots, 2);
+      eq(r.two.tier, 2, 'two free slots hold exactly an x2');
+    }
+    if (r.one) {
+      eq(r.one.slots, 1);
+      eq(r.one.tier, 0, 'one slot cannot hold even an x2, so the treatment is dropped');
     }
   });
 
@@ -891,7 +902,9 @@ suite('Magnets');
     // Whatever it says at the moment of the tap, it delivers exactly that —
     // and dropping the treatment entirely (shown 0, one number committed)
     // is an honest outcome too.
-    eq(r.committed, r.shownAfter + 1,
+    // A dropped treatment (shown 0) is an honest outcome too: the ball is
+    // then an ordinary one and a tap takes just it.
+    eq(r.committed, r.shownAfter || 1,
       `showed x${r.shownAfter}, delivered ${r.committed}`);
   });
 
@@ -938,7 +951,7 @@ suite('Magnets');
     ok(seen.length >= 1, `${seen.length} magnet(s) fired from one touch event`);
     for (const s of seen) {
       if (s.shown === null) continue;                 // fell back to a single catch
-      eq(s.delivered, s.shown + 1, `x${s.shown} delivered ${s.delivered}`);
+      eq(s.delivered, s.shown, `x${s.shown} delivered ${s.delivered}`);
     }
   });
 
@@ -996,7 +1009,7 @@ suite('Magnets');
         }
         return { offscreen: worst, row: app.state.row.primary.length };
       }, side);
-      eq(r.row, 7, `x6 at the ${side < 0 ? 'left' : 'right'} edge still delivered seven`);
+      eq(r.row, 6, `x6 at the ${side < 0 ? 'left' : 'right'} edge still delivered six`);
       ok(r.offscreen < 8,
         `${side < 0 ? 'left' : 'right'} edge: worst ${Math.round(r.offscreen)}px outside the frame`);
     }
@@ -1020,7 +1033,7 @@ suite('Magnets');
     });
     if (!r.skipped) {
       ok(r.shown >= 2, `downgraded to x${r.shown}`);
-      eq(r.committed, r.shown + 1, 'delivered exactly what it showed');
+      eq(r.committed, r.shown, 'delivered exactly what it showed');
     }
   });
 
@@ -1719,10 +1732,12 @@ suite('Reduced motion');
       return {
         row: committed,
         seated: app.balls.filter((b) => b.state === 3).length,
+        deviceGone: !app.balls.includes(m),
       };
     });
-    eq(r.row, 3);
-    eq(r.seated, 3);
+    eq(r.row, 2, 'an x2 delivers two balls');
+    eq(r.seated, 2);
+    ok(r.deviceGone, 'the spent device left the field');
   });
 
   await test('no console errors under reduced motion', () => {
@@ -1823,7 +1838,7 @@ suite('Performance');
       stop = true;
       return { longest: longest.ms, row: app.state.row.primary.length };
     });
-    eq(r.row, 7, 'x6 delivered seven numbers');
+    eq(r.row, 6, 'x6 delivered six numbers');
     ok(r.longest < 190, `longest frame ${r.longest.toFixed(0)}ms`);
   });
 
